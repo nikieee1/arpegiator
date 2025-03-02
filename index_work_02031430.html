@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tone.js PolySynth Arpeggiator (12 Digits, 300s Composition)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        input {
+            padding: 5px;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #errorLog, #harmonyLog, #musicLog {
+            margin-top: 10px;
+        }
+        #errorLog { color: red; }
+        #harmonyLog { color: blue; }
+        #musicLog { color: green; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>PolySynth Arpeggiator (12 Digits, 300s Composition)</h2>
+        <input type="text" id="digitsInput" placeholder="Enter 12 digits (e.g., 012345678901)" value="012345678901">
+        <button id="toggleButton">Start</button>
+        <div id="errorLog"></div>
+        <div id="harmonyLog"></div>
+        <div id="musicLog"></div>
+    </div>
+
+    <!-- Подключаем только Tone.js через CDN -->
+    <script src="https://unpkg.com/tone"></script>
+    <script>
+        // Инициализация переменных
+        let patternMelody = null;
+        let patternChord = null;
+        let polySynth = null;
+        let isPlaying = false;
+        const toggleButton = document.getElementById('toggleButton');
+        const digitsInput = document.getElementById('digitsInput');
+        const errorLog = document.getElementById('errorLog');
+        const harmonyLog = document.getElementById('harmonyLog');
+        const musicLog = document.getElementById('musicLog');
+
+        // Логирование
+        function log(message, isError = false, isHarmony = false, isMusic = false) {
+            console.log(message);
+            if (isError) {
+                errorLog.textContent = `Error: ${message}`;
+            } else if (isHarmony) {
+                harmonyLog.textContent = `Harmony: ${message}`;
+            } else if (isMusic) {
+                musicLog.textContent += `${message}\n`;
+                musicLog.scrollTop = musicLog.scrollHeight; // Автоматическая прокрутка вниз
+            }
+        }
+
+        // Создаем PolySynth для полифонии
+        polySynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "sine" }, // Используем синус для чистого звука
+            envelope: { attack: 0.1, decay: 0.3, sustain: 0.5, release: 1 }
+        }).toDestination();
+
+        // Масштаб C major (MIDI-номера для октавы 3)
+        const cMajorScale = [
+            { note: "C3", midi: 48, function: "Tonic" }, // 0
+            { note: "D3", midi: 50, function: "Supertonic" }, // 1
+            { note: "E3", midi: 52, function: "Mediant" }, // 2
+            { note: "F3", midi: 53, function: "Subdominant" }, // 3
+            { note: "G3", midi: 55, function: "Dominant" }, // 4
+            { note: "A3", midi: 57, function: "Submediant" }, // 5
+            { note: "B3", midi: 59, function: "Leading Tone" }, // 6
+            { note: "C4", midi: 60, function: "Tonic" }, // 7
+            { note: "D4", midi: 62, function: "Supertonic" }, // 8
+            { note: "E4", midi: 64, function: "Mediant" }  // 9
+        ];
+
+        // Диатонические аккорды C major (только корень и квинта, с функциями)
+        const cMajorChords = [
+            { root: "C3", chord: ["C3", "G3"], name: "C major (I, Tonic)", function: "Tonic" }, // 0
+            { root: "G3", chord: ["G3", "D4"], name: "G major (V, Dominant)", function: "Dominant" }, // 1
+            { root: "F3", chord: ["F3", "C4"], name: "F major (IV, Subdominant)", function: "Subdominant" }, // 2
+            { root: "A3", chord: ["A3", "E4"], name: "A minor (vi, Tonic)", function: "Tonic" }, // 3
+            { root: "D3", chord: ["D3", "A3"], name: "D minor (ii, Subdominant)", function: "Subdominant" }, // 4
+            { root: "E3", chord: ["E3", "B3"], name: "E minor (iii, Mediant)", function: "Mediant" }, // 5
+            { root: "G3", chord: ["G3", "D4"], name: "G major (V, Dominant)", function: "Dominant" }, // 6
+            { root: "F3", chord: ["F3", "C4"], name: "F major (IV, Subdominant)", function: "Subdominant" }, // 7
+            { root: "C4", chord: ["C4", "G4"], name: "C major (I, Tonic)", function: "Tonic" }, // 8
+            { root: "D4", chord: ["D4", "A4"], name: "D minor (ii, Subdominant)", function: "Subdominant" } // 9
+        ];
+
+        // Функция преобrazования цифр для секций
+        function transformDigits(digits, section) {
+            if (digits.length !== 2) return digits;
+            let d1 = parseInt(digits[0]);
+            let d2 = parseInt(digits[1]);
+            switch (section) {
+                case 'development': // Сдвиг +1
+                    d1 = (d1 + 1) % 10;
+                    d2 = (d2 + 1) % 10;
+                    break;
+                case 'climax': // Инверсия
+                    [d1, d2] = [d2, d1];
+                    break;
+                case 'end': // Возвращение к тонике (00)
+                    return '00';
+            }
+            return `${d1}${d2}`;
+        }
+
+        // Функция проверки воспроизведения звука
+        function checkSoundPlaying() {
+            return new Promise((resolve) => {
+                const checkInterval = setInterval(() => {
+                    if (polySynth.get().voices.some(voice => voice.output.gain.value > 0)) {
+                        clearInterval(checkInterval);
+                        resolve(true);
+                        log("Sound is playing successfully", false, false, true);
+                    } else if (Date.now() > Date.now() + 5000) { // Таймаут 5 секунд
+                        clearInterval(checkInterval);
+                        resolve(false);
+                        log("Sound playback failed, check configuration", true);
+                    }
+                }, 100);
+            });
+        }
+
+        // Функция создания и управления арпеджиатором с автопроверкой звука
+        async function createArpeggiator(input) {
+            try {
+                // Парсим 12 цифр (максимум 6 пар)
+                const digits = input.trim();
+                if (digits.length !== 12 || isNaN(parseInt(digits))) {
+                    log("Invalid input, enter exactly 12 digits (e.g., 012345678901) where each is 0-9", true);
+                    digitsInput.value = "012345678901";
+                    await createArpeggiator("012345678901");
+                    return;
+                }
+
+                // Разделяем на 6 пар
+                const pairs = digits.match(/.{1,2}/g) || [];
+                if (pairs.length !== 6) {
+                    log("Invalid input, ensure exactly 12 digits", true);
+                    digitsInput.value = "012345678901";
+                    await createArpeggiator("012345678901");
+                    return;
+                }
+
+                // Разделяем на секции: начало (1 пара), развитие (2 пары), апогей (2 пары), конец (1 пара)
+                const phrase = [
+                    pairs[0], // Начало
+                    pairs[1], pairs[2], // Развитие
+                    pairs[3], pairs[4], // Апогей
+                    pairs[5] // Конец (автоматически 00 для завершения, если не указано)
+                ];
+
+                // Если конец не завершает на тонике, добавляем 00
+                if (phrase[phrase.length - 1] !== "00") {
+                    phrase[phrase.length - 1] = "00";
+                    log("Ensuring phrase ends on Tonic (00)", false, true);
+                }
+
+                // Очищаем предыдущий лог музыки
+                musicLog.textContent = "";
+
+                // Отрисовываем фразу (без VexFlow)
+                phrase.forEach((pair, index) => {
+                    const transformedPair = transformDigits(pair, ['start', 'development', 'development', 'climax', 'climax', 'end'][index]);
+                    const melodyDigit = parseInt(transformedPair[0]);
+                    const chordDigit = parseInt(transformedPair[1]);
+                    const section = ['start', 'development', 'development', 'climax', 'climax', 'end'][index];
+
+                    if (melodyDigit < 0 || melodyDigit > 9 || chordDigit < 0 || chordDigit > 9) {
+                        log("Invalid digit in phrase, skipping", true);
+                        return;
+                    }
+
+                    const melodyNote = cMajorScale[melodyDigit].note;
+                    const melodyFunction = cMajorScale[melodyDigit].function;
+                    const chordData = cMajorChords[chordDigit];
+                    const chordNotes = chordData.chord;
+                    const chordFunction = chordData.function;
+
+                    log(`Section ${section}, Step ${index + 1}: Melody note: ${melodyNote} (${melodyFunction}), Chord: ${chordData.name} (${chordFunction})`, false, false, true);
+                });
+
+                // Если паттерны уже существуют, удаляем их
+                if (patternMelody) patternMelody.dispose();
+                if (patternChord) patternChord.dispose();
+
+                // Создаем паттерн для мелодии (одна нота за раз, повторяется)
+                let melodyNotes = [];
+                let chordNotesArray = [];
+                let totalDuration = 0;
+
+                phrase.forEach((pair, index) => {
+                    const transformedPair = transformDigits(pair, ['start', 'development', 'development', 'climax', 'climax', 'end'][index]);
+                    const melodyDigit = parseInt(transformedPair[0]);
+                    const chordDigit = parseInt(transformedPair[1]);
+                    const section = ['start', 'development', 'development', 'climax', 'climax', 'end'][index];
+                    const duration = section === 'start' || section === 'end' ? 4 : section === 'development' ? 2 : 1;
+
+                    const melodyNote = cMajorScale[melodyDigit].note;
+                    const chordNotes = cMajorChords[chordDigit].chord;
+
+                    melodyNotes.push(melodyNote);
+                    chordNotesArray.push(...chordNotes);
+
+                    totalDuration += duration / 4; // Преобразуем в четверти для Tone.js
+                });
+
+                // Устанавливаем длительность всей композиции (примерно 300 секунд)
+                const totalSeconds = totalDuration * 0.5; // Примерно 0.5 секунды на четверть (темп 120 bpm)
+                if (totalSeconds > 300) {
+                    log("Composition exceeds 300 seconds, adjusting tempo", true);
+                    // Уменьшаем темп, чтобы уложиться в 300 секунд
+                    Tone.Transport.bpm.value = Math.floor(120 * (totalDuration / (300 / 0.5)));
+                } else {
+                    Tone.Transport.bpm.value = 120; // Стандартный темп
+                }
+
+                // Создаем паттерн для мелодии
+                patternMelody = new Tone.Pattern(function(time, note) {
+                    polySynth.triggerAttackRelease(note, "4n", time); // Долгая нота для мелодии
+                }, melodyNotes, "up");
+
+                // Создаем паттерн для аккорда
+                patternChord = new Tone.Pattern(function(time, note) {
+                    polySynth.triggerAttackRelease(note, "8n", time); // Короткие ноты для аккорда
+                }, chordNotesArray, "up");
+
+                // Устанавливаем интервалы воспроизведения
+                patternMelody.interval = "4n";
+                patternChord.interval = "8n";
+
+                // Запускаем или останавливаем
+                if (!isPlaying) {
+                    // Активируем AudioContext
+                    await Tone.start();
+                    log("AudioContext started");
+
+                    Tone.Transport.start();
+                    patternMelody.start(0);
+                    patternChord.start(0);
+                    isPlaying = true;
+                    toggleButton.textContent = "Stop";
+
+                    // Проверяем воспроизведение звука
+                    const soundPlaying = await checkSoundPlaying();
+                    if (!soundPlaying) {
+                        log("Sound playback failed, check browser settings or Tone.js configuration", true);
+                    }
+                } else {
+                    patternMelody.stop();
+                    patternChord.stop();
+                    Tone.Transport.stop();
+                    isPlaying = false;
+                    toggleButton.textContent = "Start";
+                    log("Arpeggiator stopped");
+                }
+            } catch (error) {
+                log("Error in createArpeggiator: " + error.message, true);
+            }
+        }
+
+        // Обработчик кнопки
+        toggleButton.addEventListener('click', async () => {
+            try {
+                const input = digitsInput.value.trim();
+                await createArpeggiator(input);
+            } catch (error) {
+                log("Error in button click: " + error.message, true);
+            }
+        });
+
+        // Обработчик ввода (запуск при нажатии Enter)
+        digitsInput.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                try {
+                    const input = digitsInput.value.trim();
+                    await createArpeggiator(input);
+                } catch (error) {
+                    log("Error in Enter keypress: " + error.message, true);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
