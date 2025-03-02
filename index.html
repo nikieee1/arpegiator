@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tone.js Piano Sampler Arpeggiator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        input {
+            padding: 5px;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #errorLog {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Piano Sampler Arpeggiator</h2>
+        <input type="number" id="numberInput" min="0" max="9" value="0" placeholder="Enter a number (0-9)">
+        <button id="toggleButton">Start</button>
+        <div id="errorLog"></div>
+    </div>
+
+    <!-- Подключаем Tone.js через CDN -->
+    <script src="https://unpkg.com/tone"></script>
+    <script>
+        // Инициализация переменных
+        let pattern = null;
+        let sampler = null;
+        let isPlaying = false;
+        const toggleButton = document.getElementById('toggleButton');
+        const numberInput = document.getElementById('numberInput');
+        const errorLog = document.getElementById('errorLog');
+
+        // Логирование
+        function log(message, isError = false) {
+            console.log(message);
+            if (isError) {
+                errorLog.textContent = `Error: ${message}`;
+            }
+        }
+
+        // Создаем Tone.Sampler с семплами пианино из Tone.js (Salamander, как в рабочем примере)
+        try {
+            sampler = new Tone.Sampler({
+                urls: {
+                    "A0": "A0.mp3",
+                    "C1": "C1.mp3",
+                    "D#1": "Ds1.mp3",
+                    "F#1": "Fs1.mp3",
+                    "A1": "A1.mp3",
+                    "C2": "C2.mp3",
+                    "D#2": "Ds2.mp3",
+                    "F#2": "Fs2.mp3",
+                    "A2": "A2.mp3",
+                    "C3": "C3.mp3",
+                    "D#3": "Ds3.mp3",
+                    "F#3": "Fs3.mp3",
+                    "A3": "A3.mp3",
+                    "C4": "C4.mp3",
+                    "D#4": "Ds4.mp3",
+                    "F#4": "Fs4.mp3",
+                    "A4": "A4.mp3",
+                    "C5": "C5.mp3",
+                    "D#5": "Ds5.mp3",
+                    "F#5": "Fs5.mp3",
+                    "A5": "A5.mp3",
+                    "C6": "C6.mp3",
+                    "D#6": "Ds6.mp3",
+                    "F#6": "Fs6.mp3",
+                    "A6": "A6.mp3",
+                    "C7": "C7.mp3",
+                    "D#7": "Ds7.mp3",
+                    "F#7": "Fs7.mp3",
+                    "A7": "A7.mp3",
+                    "C8": "C8.mp3"
+                },
+                release: 1, // Естественное затухание звука, как в рабочем примере
+                baseUrl: "https://tonejs.github.io/audio/salamander/",
+                onload: () => {
+                    log("Piano samples loaded successfully!");
+                },
+                onerror: (error) => {
+                    log("Failed to load samples: " + error, true);
+                }
+            }).toDestination();
+        } catch (error) {
+            log("Error initializing sampler: " + error.message, true);
+        }
+
+        // Функция создания и управления арпеджиатором
+        async function createArpeggiator(n) {
+            try {
+                // Ограничение входного значения от 0 до 9
+                n = Math.max(0, Math.min(9, n));
+                log(`Starting arpeggiator with input: ${n}`);
+
+                // Определяем корневую ноту и аккорд (основываясь на MIDI-номерах)
+                const rootNoteNumber = 48 + n; // C3 = 48, A3 = 57
+                const chordNotes = [rootNoteNumber, rootNoteNumber + 4, rootNoteNumber + 7]; // Мажорный аккорд
+                const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+                // Функция преобразования MIDI-номера в название ноты
+                function noteNumberToName(noteNumber) {
+                    const noteName = notes[noteNumber % 12];
+                    const octave = Math.floor((noteNumber - 12) / 12);
+                    return noteName + octave;
+                }
+
+                // Преобразуем номера нот в названия
+                const noteNames = chordNotes.map(noteNumberToName);
+                log(`Chord notes: ${noteNames.join(", ")}`);
+
+                // Если паттерн уже существует, удаляем его
+                if (pattern) {
+                    pattern.dispose();
+                    log("Previous pattern disposed");
+                }
+
+                // Создаем новый паттерн с использованием sampler
+                pattern = new Tone.Pattern(function(time, note) {
+                    if (sampler.loaded) {
+                        sampler.triggerAttackRelease(note, "8n", time);
+                    } else {
+                        log("Sampler not loaded, skipping note", true);
+                    }
+                }, noteNames, "up");
+
+                // Устанавливаем интервал воспроизведения
+                pattern.interval = "8n";
+
+                // Запускаем или останавливаем
+                if (!isPlaying) {
+                    // Активируем AudioContext
+                    await Tone.start();
+                    log("AudioContext started");
+
+                    // Ожидаем загрузки семплов
+                    await Tone.loaded();
+                    log("Samples loaded, starting playback");
+
+                    Tone.Transport.start();
+                    pattern.start(0);
+                    isPlaying = true;
+                    toggleButton.textContent = "Stop";
+                } else {
+                    pattern.stop();
+                    Tone.Transport.stop();
+                    isPlaying = false;
+                    toggleButton.textContent = "Start";
+                    log("Arpeggiator stopped");
+                }
+            } catch (error) {
+                log("Error in createArpeggiator: " + error.message, true);
+            }
+        }
+
+        // Обработчик кнопки
+        toggleButton.addEventListener('click', async () => {
+            try {
+                const inputValue = parseInt(numberInput.value);
+                if (isNaN(inputValue) || inputValue < 0 || inputValue > 9) {
+                    log("Invalid input, defaulting to 0", true);
+                    numberInput.value = 0;
+                    await createArpeggiator(0);
+                } else {
+                    await createArpeggiator(inputValue);
+                }
+            } catch (error) {
+                log("Error in button click: " + error.message, true);
+            }
+        });
+
+        // Обработчик ввода (запуск при нажатии Enter)
+        numberInput.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                try {
+                    const inputValue = parseInt(numberInput.value);
+                    if (isNaN(inputValue) || inputValue < 0 || inputValue > 9) {
+                        log("Invalid input, defaulting to 0", true);
+                        numberInput.value = 0;
+                        await createArpeggiator(0);
+                    } else {
+                        await createArpeggiator(inputValue);
+                    }
+                } catch (error) {
+                    log("Error in Enter keypress: " + error.message, true);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
